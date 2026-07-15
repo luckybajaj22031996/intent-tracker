@@ -1,0 +1,617 @@
+openapi: 3.1.0
+info:
+  title: Intention Store
+  version: 1.0.0
+  description: >
+    Client-side service layer that reads and writes intention and evening-rating
+    records to IndexedDB first, then syncs to Supabase Postgres when online.
+    Enforces the 140-character limit and the single-intention-per-day constraint.
+    Part of the DayDrop mobile-first progressive web app.
+
+servers:
+  - url: http://localhost:8080
+    description: Local developer machine
+
+tags:
+  - name: intentions
+    description: Daily intention records and evening ratings
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns the liveness status of the service. No authentication required.
+      operationId: healthCheck
+      tags:
+        - intentions
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                service: intention-store-service
+                timestamp: '2026-07-15T08:00:00.000Z'
+
+  /api/intentions:
+    post:
+      summary: Save today's intention
+      description: >
+        Persist today's intention text locally and queue for Supabase sync.
+        Enforces the 140-character limit and the single-intention-per-day constraint.
+        Writes the record to the local store first; attempts an immediate sync to
+        Supabase Postgres. Returns synced: true if the sync succeeded, synced: false
+        if the device is offline or the sync failed (the record is safely queued).
+      operationId: saveIntention
+      tags:
+        - intentions
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveIntentionRequest'
+            example:
+              text: Focus on deep work and avoid context-switching today.
+              date: '2026-07-15'
+      responses:
+        '201':
+          description: Intention saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveIntentionResponse'
+              example:
+                id: a3f7c2d1-84b0-4e2a-9c6f-1d2e3f4a5b6c
+                synced: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: List all intentions
+      description: >
+        Return all intention records for the current user, used to populate the
+        calendar history view. Results are ordered by date ascending. Each record
+        includes the intention text and evening rating (if reviewed).
+      operationId: listIntentions
+      tags:
+        - intentions
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: List of all intention records for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListIntentionsResponse'
+              example:
+                intentions:
+                  - id: b9e1d4c2-33a7-4f8b-bc2e-7a6f5e4d3c2b
+                    userId: user-uuid-1234
+                    date: '2026-07-14'
+                    text: Be present in every conversation.
+                    rating: honoured
+                    synced: true
+                    createdAt: '2026-07-14T07:00:00.000Z'
+                    updatedAt: '2026-07-14T21:00:00.000Z'
+                  - id: a3f7c2d1-84b0-4e2a-9c6f-1d2e3f4a5b6c
+                    userId: user-uuid-1234
+                    date: '2026-07-15'
+                    text: Focus on deep work and avoid context-switching today.
+                    rating: null
+                    synced: false
+                    createdAt: '2026-07-15T07:00:00.000Z'
+                    updatedAt: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/intentions/today:
+    get:
+      summary: Get today's intention
+      description: >
+        Retrieve today's intention record from the local store.
+        Returns the matching record if found, or null if no intention has been set
+        for the given date. Used by the morning and evening screens to determine
+        whether the user has already set an intention for today.
+      operationId: getTodaysIntention
+      tags:
+        - intentions
+      security:
+        - bearerJwt: []
+      parameters:
+        - $ref: '#/components/parameters/DateQuery'
+      responses:
+        '200':
+          description: Today's intention record, or null if not yet set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTodaysIntentionResponse'
+              examples:
+                found:
+                  summary: Intention exists for today
+                  value:
+                    intention:
+                      id: a3f7c2d1-84b0-4e2a-9c6f-1d2e3f4a5b6c
+                      userId: user-uuid-1234
+                      date: '2026-07-15'
+                      text: Focus on deep work and avoid context-switching today.
+                      rating: null
+                      synced: false
+                      createdAt: '2026-07-15T07:00:00.000Z'
+                      updatedAt: null
+                not_found:
+                  summary: No intention set for today
+                  value:
+                    intention: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/intentions/previous:
+    get:
+      summary: Get previous intention
+      description: >
+        Retrieve the most recent past intention for secondary context display.
+        Returns the intention record with the most recent date strictly before
+        the given beforeDate, or null if no prior records exist.
+        Used by the morning screen to display the previous day's intention as
+        secondary context (returning-user experience).
+      operationId: getPreviousIntention
+      tags:
+        - intentions
+      security:
+        - bearerJwt: []
+      parameters:
+        - $ref: '#/components/parameters/BeforeDateQuery'
+      responses:
+        '200':
+          description: Most recent past intention record, or null if none exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPreviousIntentionResponse'
+              examples:
+                found:
+                  summary: Previous intention exists
+                  value:
+                    intention:
+                      id: b9e1d4c2-33a7-4f8b-bc2e-7a6f5e4d3c2b
+                      userId: user-uuid-1234
+                      date: '2026-07-14'
+                      text: Be present in every conversation.
+                      rating: honoured
+                      synced: true
+                      createdAt: '2026-07-14T07:00:00.000Z'
+                      updatedAt: '2026-07-14T21:00:00.000Z'
+                not_found:
+                  summary: No previous intention exists
+                  value:
+                    intention: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/intentions/rating:
+    patch:
+      summary: Save evening rating
+      description: >
+        Attach an evening rating to today's intention record.
+        Updates the matching intention record in the local store, setting the
+        rating field. Attempts an immediate sync to Supabase Postgres.
+        Returns synced: true if the sync succeeded, synced: false if the device
+        is offline or the sync failed (the update is safely queued).
+        Requires an existing intention record for the given date.
+      operationId: saveEveningRating
+      tags:
+        - intentions
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveEveningRatingRequest'
+            example:
+              date: '2026-07-15'
+              rating: honoured
+      responses:
+        '200':
+          description: Evening rating saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveEveningRatingResponse'
+              example:
+                synced: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Supabase user JWT session token obtained after magic link authentication.
+        Provide as: Authorization: Bearer <token>
+
+  parameters:
+    DateQuery:
+      name: date
+      in: query
+      required: true
+      description: ISO date string (YYYY-MM-DD) for today
+      schema:
+        type: string
+        format: date
+        example: '2026-07-15'
+
+    BeforeDateQuery:
+      name: beforeDate
+      in: query
+      required: true
+      description: ISO date string (YYYY-MM-DD); returns the latest record before this date
+      schema:
+        type: string
+        format: date
+        example: '2026-07-15'
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+        - timestamp
+      properties:
+        status:
+          type: string
+          description: Health status of the service
+          example: ok
+        service:
+          type: string
+          description: Service name
+          example: intention-store-service
+        timestamp:
+          type: string
+          format: date-time
+          description: Current server timestamp
+          example: '2026-07-15T08:00:00.000Z'
+
+    IntentionRecord:
+      type: object
+      required:
+        - id
+        - userId
+        - date
+        - text
+        - rating
+        - synced
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Locally generated record identifier
+          example: a3f7c2d1-84b0-4e2a-9c6f-1d2e3f4a5b6c
+        userId:
+          type: string
+          format: uuid
+          description: Identifier of the authenticated user who owns this record
+          example: user-uuid-1234
+        date:
+          type: string
+          format: date
+          description: ISO date string (YYYY-MM-DD) for the day the intention was set
+          example: '2026-07-15'
+        text:
+          type: string
+          maxLength: 140
+          description: The intention text; maximum 140 characters
+          example: Focus on deep work and avoid context-switching today.
+        rating:
+          type:
+            - string
+            - 'null'
+          enum:
+            - honoured
+            - partial
+            - not_today
+            - null
+          description: Evening self-assessment; null until the evening review is completed
+          example: null
+        synced:
+          type: boolean
+          description: Whether this record has been successfully written to Supabase
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp of local record creation
+          example: '2026-07-15T07:00:00.000Z'
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Timestamp of the most recent local update; null if never updated
+          example: null
+
+    SaveIntentionRequest:
+      type: object
+      required:
+        - text
+        - date
+      properties:
+        text:
+          type: string
+          maxLength: 140
+          description: The intention text the user wants to set for the day; maximum 140 characters
+          example: Focus on deep work and avoid context-switching today.
+        date:
+          type: string
+          format: date
+          description: ISO date string representing today's date
+          example: '2026-07-15'
+
+    SaveIntentionResponse:
+      type: object
+      required:
+        - id
+        - synced
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The locally generated record identifier assigned to this intention entry
+          example: a3f7c2d1-84b0-4e2a-9c6f-1d2e3f4a5b6c
+        synced:
+          type: boolean
+          description: >
+            Indicates whether the record was immediately synced to Supabase Postgres (true)
+            or is queued locally pending connectivity (false)
+          example: false
+
+    GetTodaysIntentionResponse:
+      type: object
+      required:
+        - intention
+      properties:
+        intention:
+          oneOf:
+            - $ref: '#/components/schemas/IntentionRecord'
+            - type: 'null'
+          description: The intention record for today, or null if no intention has been set
+
+    GetPreviousIntentionResponse:
+      type: object
+      required:
+        - intention
+      properties:
+        intention:
+          oneOf:
+            - $ref: '#/components/schemas/IntentionRecord'
+            - type: 'null'
+          description: The most recent past intention record before the given date, or null
+
+    SaveEveningRatingRequest:
+      type: object
+      required:
+        - date
+        - rating
+      properties:
+        date:
+          type: string
+          format: date
+          description: ISO date string for today; identifies the intention record to attach the rating to
+          example: '2026-07-15'
+        rating:
+          type: string
+          enum:
+            - honoured
+            - partial
+            - not_today
+          description: The user's self-assessment of whether they honoured their intention
+          example: honoured
+          x-enum-varnames:
+            - HONOURED
+            - PARTIAL
+            - NOT_TODAY
+
+    SaveEveningRatingResponse:
+      type: object
+      required:
+        - synced
+      properties:
+        synced:
+          type: boolean
+          description: >
+            Indicates whether the rating update was immediately synced to Supabase Postgres (true)
+            or is queued locally pending connectivity (false)
+          example: true
+
+    ListIntentionsResponse:
+      type: object
+      required:
+        - intentions
+      properties:
+        intentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntentionRecord'
+          description: Array of all intention records for the current user, ordered by date ascending
+          example:
+            - id: b9e1d4c2-33a7-4f8b-bc2e-7a6f5e4d3c2b
+              userId: user-uuid-1234
+              date: '2026-07-14'
+              text: Be present in every conversation.
+              rating: honoured
+              synced: true
+              createdAt: '2026-07-14T07:00:00.000Z'
+              updatedAt: '2026-07-14T21:00:00.000Z'
+
+    ErrorEnvelope:
+      type: object
+      required:
+        - errorCode
+        - message
+        - timestamp
+        - traceId
+      properties:
+        errorCode:
+          type: string
+          description: Machine-readable error code
+          example: INTENTION_ALREADY_SET
+        message:
+          type: string
+          description: Human-readable error message
+          example: You have already set today's intention.
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp when the error occurred
+          example: '2026-07-15T08:00:00.000Z'
+        traceId:
+          type: string
+          description: Correlation ID for tracing the request
+          example: 550e8400-e29b-41d4-a716-446655440000
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationDetail'
+          description: Optional array of field-level validation details
+
+    ValidationDetail:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          description: The field that failed validation
+          example: text
+        message:
+          type: string
+          description: Description of the validation failure
+          example: Intention must be 140 characters or fewer.
+
+  responses:
+    BadRequest:
+      description: Bad request — missing or malformed input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: VALIDATION_ERROR
+            message: date is required.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    Unauthorized:
+      description: Unauthorized — missing or invalid session token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: UNAUTHORIZED
+            message: Missing or invalid Authorization header. Provide a Bearer token.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    Forbidden:
+      description: Forbidden — authenticated but not permitted
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: FORBIDDEN
+            message: You do not have permission to access this resource.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    NotFound:
+      description: Not found — resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: INTENTION_NOT_FOUND
+            message: No intention found for today.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    Conflict:
+      description: Conflict — state conflict (e.g. intention already set for today)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: INTENTION_ALREADY_SET
+            message: You have already set today's intention.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    UnprocessableEntity:
+      description: Unprocessable entity — semantic validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: TEXT_TOO_LONG
+            message: Intention must be 140 characters or fewer.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    InternalServerError:
+      description: Internal server error — unexpected server failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: INTERNAL_SERVER_ERROR
+            message: An unexpected error occurred.
+            timestamp: '2026-07-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000

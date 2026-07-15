@@ -1,0 +1,244 @@
+openapi: 3.1.0
+
+info:
+  title: Sync Service
+  version: 1.0.0
+  description: >
+    Manages bidirectional synchronisation between the local IndexedDB store and
+    Supabase Postgres for the DayDrop application. Triggered on network
+    reconnection and after authentication. Resolves conflicts by treating the
+    most recent write as authoritative (last-write-wins).
+
+servers:
+  - url: http://localhost:8081
+    description: Local developer machine
+
+tags:
+  - name: sync
+    description: Sync cycle operations between IndexedDB and Supabase Postgres
+  - name: health
+    description: Liveness and readiness probes
+
+paths:
+  /sync/trigger:
+    post:
+      operationId: triggerSync
+      summary: Trigger a full bidirectional sync
+      description: >
+        Initiates a full sync of pending local IndexedDB changes to Supabase
+        Postgres and pulls any remote changes back to the local store. Called
+        internally by the application when the device regains network
+        connectivity or immediately after the user completes magic-link
+        authentication. Requires a valid Supabase JWT in the Authorization
+        header. Conflicts are resolved using last-write-wins (most recent
+        updatedAt timestamp wins). Audit-logged on every push and pull
+        operation.
+      tags:
+        - sync
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerSyncRequest'
+            example:
+              {}
+      responses:
+        '200':
+          description: Sync completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+              example:
+                pushed: 3
+                pulled: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Liveness probe
+      description: Returns 200 OK when the service process is alive.
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                service: sync-service
+
+  /health/ready:
+    get:
+      operationId: readinessCheck
+      summary: Readiness probe
+      description: Returns 200 OK when the service is ready to accept traffic.
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ready
+                service: sync-service
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Supabase user JWT session token obtained after magic-link
+        authentication. Pass as `Authorization: Bearer <token>`.
+
+  schemas:
+    TriggerSyncRequest:
+      type: object
+      description: >
+        No fields are required to initiate a sync. The service derives all
+        necessary context from the local store and the active Supabase session.
+      properties: {}
+      example: {}
+
+    SyncResult:
+      type: object
+      description: Summary of a completed sync cycle.
+      required:
+        - pushed
+        - pulled
+      properties:
+        pushed:
+          type: integer
+          format: int32
+          minimum: 0
+          description: >
+            Number of local records successfully pushed to Supabase during
+            this sync cycle.
+          example: 3
+        pulled:
+          type: integer
+          format: int32
+          minimum: 0
+          description: >
+            Number of remote records pulled from Supabase and written to the
+            local IndexedDB store during this sync cycle.
+          example: 1
+      example:
+        pushed: 3
+        pulled: 1
+
+    HealthResponse:
+      type: object
+      description: Health check response payload.
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          description: Current health status of the service.
+          enum:
+            - ok
+            - ready
+          example: ok
+        service:
+          type: string
+          description: Service identifier.
+          example: sync-service
+      example:
+        status: ok
+        service: sync-service
+
+    ErrorEnvelope:
+      type: object
+      description: Standard error response envelope.
+      required:
+        - errorCode
+        - message
+        - timestamp
+        - traceId
+      properties:
+        errorCode:
+          type: string
+          description: Machine-readable error code.
+          example: SYNC_UNAUTHENTICATED
+        message:
+          type: string
+          description: Human-readable error description.
+          example: No active Supabase session exists; Sign in to sync your data.
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the error occurred.
+          example: '2024-01-15T08:00:00.000Z'
+        traceId:
+          type: string
+          description: Unique identifier for correlating logs and traces.
+          example: 550e8400-e29b-41d4-a716-446655440000
+      example:
+        errorCode: SYNC_UNAUTHENTICATED
+        message: No active Supabase session exists; Sign in to sync your data.
+        timestamp: '2024-01-15T08:00:00.000Z'
+        traceId: 550e8400-e29b-41d4-a716-446655440000
+
+  responses:
+    Unauthorized:
+      description: >
+        No valid Supabase user session was present when sync was triggered.
+        The caller should prompt re-authentication.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: SYNC_UNAUTHENTICATED
+            message: No active Supabase session exists; Sign in to sync your data.
+            timestamp: '2024-01-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    InternalServerError:
+      description: >
+        An unexpected failure occurred during the push or pull phase. Partial
+        progress may have been made and the sync should be retried.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: SYNC_INTERNAL_ERROR
+            message: An unexpected failure occurred during sync. Please retry.
+            timestamp: '2024-01-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    ServiceUnavailable:
+      description: >
+        Supabase could not be reached during the sync attempt. The caller
+        should retry when connectivity is confirmed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errorCode: SYNC_NETWORK_ERROR
+            message: Supabase could not be reached. Please retry when connectivity is confirmed.
+            timestamp: '2024-01-15T08:00:00.000Z'
+            traceId: 550e8400-e29b-41d4-a716-446655440000

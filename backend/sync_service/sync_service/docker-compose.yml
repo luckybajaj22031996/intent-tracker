@@ -1,0 +1,56 @@
+version: '3.9'
+
+services:
+  sync-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # HARD CONSTRAINT: sync-service is assigned port 8081
+    ports:
+      - "8081:8081"
+    environment:
+      # Service port — MUST be 8081
+      PORT: "8081"
+      NODE_ENV: "production"
+      LOG_LEVEL: "info"
+
+      # Supabase external API — configure as env vars (kind: api, not docker-compose service)
+      # SUPABASE_URL and SUPABASE_ANON_KEY are required; no defaults — service fails fast if missing
+      SUPABASE_URL: "${SUPABASE_URL}"
+      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY}"
+
+      # Sibling service: Intention Store at port 8080 (from 00_Application-Context.md port roster)
+      INTENTION_STORE_BASE_URL: "http://intention-store-service:8080"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Supabase Postgres — local dev replica
+  # (kind: sql, engine: postgresql — per 01_Service-Context.md)
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: daydrop
+      POSTGRES_USER: daydrop_user
+      POSTGRES_PASSWORD: daydrop_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U daydrop_user -d daydrop"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local

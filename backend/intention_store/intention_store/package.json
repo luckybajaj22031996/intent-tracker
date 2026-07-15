@@ -1,0 +1,49 @@
+{
+  "name": "intention-store-service",
+  "version": "1.0.0",
+  "description": "Client-side service layer that reads and writes intention and evening-rating records to IndexedDB first, then syncs to Supabase Postgres when online.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "lint": "eslint src --ext .ts --max-warnings 0",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "test": "jest --coverage --forceExit",
+    "test:unit": "jest --testPathPattern='tests/unit' --coverage --forceExit",
+    "test:integration": "jest --testPathPattern='tests/integration' --coverage --forceExit",
+    "test:contract": "jest --testPathPattern='tests/contract' --coverage --forceExit",
+    "test:e2e": "jest --testPathPattern='tests/e2e' --coverage --forceExit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "uuid": "^9.0.0",
+    "winston": "^3.11.0",
+    "fake-indexeddb": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.6",
+    "@types/supertest": "^6.0.2",
+    "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

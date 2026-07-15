@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface text-white font-sans antialiased;
+    min-height: 100dvh;
+    overscroll-behavior: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  /* Focus visible styles */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-400;
+  }
+}
+
+@layer components {
+  .safe-area-inset {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .card {
+    @apply bg-surface-card rounded-2xl p-6;
+  }
+
+  .btn-primary {
+    @apply bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white font-semibold
+           rounded-xl px-6 py-3 transition-colors duration-150 disabled:opacity-50
+           disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-brand-400
+           focus-visible:ring-offset-2 focus-visible:ring-offset-surface;
+  }
+
+  .btn-secondary {
+    @apply bg-surface-elevated hover:bg-opacity-80 text-white font-medium
+           rounded-xl px-6 py-3 transition-colors duration-150 disabled:opacity-50
+           disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply text-brand-400 hover:text-brand-300 font-medium transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-elevated border border-white/10 rounded-xl px-4 py-3
+           text-white placeholder-white/40 focus:outline-none focus:border-brand-400
+           focus:ring-1 focus:ring-brand-400 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed resize-none;
+  }
+
+  .error-banner {
+    @apply bg-red-900/40 border border-red-500/50 text-red-300 rounded-xl px-4 py-3
+           text-sm animate-fade-in;
+  }
+
+  .skeleton {
+    @apply bg-white/10 rounded-lg animate-pulse;
+  }
+}
